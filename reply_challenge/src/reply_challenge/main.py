@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +27,9 @@ from reply_challenge.tools import (
     transcribe_audio,
 )
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 
 def _extract_transactions(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
@@ -37,8 +43,30 @@ def _extract_transactions(payload: Any) -> list[dict[str, Any]]:
 
 
 def _iter_dataset_files(data_dir: Path) -> list[Path]:
-    files = sorted(p for p in data_dir.rglob("*.json") if p.is_file())
-    return [f for f in files if f.name.lower() != "locations.json"]
+    files = sorted(p for p in data_dir.rglob("*.*") if p.is_file())
+    return [f for f in files if f.suffix.lower() in {".json", ".csv"} and f.name.lower() != "locations.json"]
+
+
+def _load_transactions_from_file(dataset_file: Path) -> list[dict[str, Any]]:
+    if dataset_file.suffix.lower() == ".csv":
+        with dataset_file.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            return [dict(row) for row in reader]
+
+    payload = load_json_file(dataset_file)
+    return _extract_transactions(payload)
+
+
+def _dataset_root_for_file(dataset_file: Path, data_dir: Path) -> Path:
+    try:
+        relative_path = dataset_file.relative_to(data_dir)
+    except ValueError:
+        return dataset_file.parent
+
+    if not relative_path.parts:
+        return data_dir
+
+    return data_dir / relative_path.parts[0]
 
 
 def _analyze_transaction_signals(
@@ -86,34 +114,56 @@ def _analyze_transaction_signals(
 def run() -> None:
     load_dotenv()
 
+    # Log environment check
+    import os
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        logger.warning("❌ OPENROUTER_API_KEY is NOT set! LLM calls will fail.")
+    else:
+        logger.info(f"✓ OPENROUTER_API_KEY is set (first 10 chars: {api_key[:10]}...)")
+    
+    langfuse_host = os.getenv("LANGFUSE_HOST", "")
+    logger.info(f"✓ LANGFUSE_HOST={langfuse_host}")
+    
+    timeout_seconds = os.getenv("TRANSACTION_TIMEOUT_SECONDS", "60")
+    logger.info(f"✓ TRANSACTION_TIMEOUT_SECONDS={timeout_seconds}")
+
     parser = argparse.ArgumentParser(description="Wealth-Guardian MAS fraud detector")
     parser.add_argument("--data-dir", default="data", help="Directory containing challenge JSON datasets")
     parser.add_argument("--output", default="output.txt", help="Output file with one fraud ID per line")
     parser.add_argument("--team-name", default="REPLY-MIRROR", help="Team name used in Langfuse session_id")
     parser.add_argument("--fraud-threshold", type=float, default=0.65, help="Minimum confidence to mark fraud")
+    parser.add_argument("--max-transactions", type=int, default=0, help="Optional cap for quick smoke tests")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir).resolve()
     if not data_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {data_dir}")
 
+    logger.info(f"Starting fraud detection with max_transactions={args.max_transactions} on {data_dir}")
+
     fraud_ids: list[str] = []
     forensic_memory = ForensicSharedMemory.instance()
     recurring_tracker = RecurringPatternTracker()
     mas = WealthGuardianMAS(team_name=args.team_name)
+    processed_transactions = 0
 
     for dataset_file in _iter_dataset_files(data_dir):
-        payload = load_json_file(dataset_file)
-        transactions = _extract_transactions(payload)
+        transactions = _load_transactions_from_file(dataset_file)
 
         for tx in transactions:
+            if args.max_transactions > 0 and processed_transactions >= args.max_transactions:
+                break
+
             tx_id = detect_transaction_id(tx)
             if not tx_id:
                 continue
 
+            processed_transactions += 1
+
             analysis_signals, tier = _analyze_transaction_signals(
                 transaction=tx,
-                dataset_root=dataset_file.parent,
+                dataset_root=_dataset_root_for_file(dataset_file, data_dir),
                 forensic_memory=forensic_memory,
                 recurring_tracker=recurring_tracker,
             )
@@ -134,6 +184,9 @@ def run() -> None:
                     else:
                         forensic_memory.mark_indicator("id", str(indicator))
 
+        if args.max_transactions > 0 and processed_transactions >= args.max_transactions:
+            break
+
     output_path = Path(args.output).resolve()
     output_path.write_text("\n".join(fraud_ids) + ("\n" if fraud_ids else ""), encoding="utf-8")
 
@@ -151,4 +204,8 @@ def test() -> None:
 
 
 def run_with_trigger() -> None:
+    run()
+
+
+if __name__ == "__main__":
     run()

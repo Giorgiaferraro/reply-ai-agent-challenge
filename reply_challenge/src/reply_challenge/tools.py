@@ -43,7 +43,7 @@ def detect_transaction_id(transaction: dict[str, Any]) -> str:
 
 
 def detect_user_id(transaction: dict[str, Any]) -> str:
-    for key in ("user_id", "customer_id", "account_id", "owner_id"):
+    for key in ("user_id", "sender_id", "customer_id", "account_id", "owner_id"):
         if transaction.get(key):
             return str(transaction[key])
     return "unknown-user"
@@ -57,14 +57,14 @@ def detect_amount(transaction: dict[str, Any]) -> float:
 
 
 def detect_sender(transaction: dict[str, Any]) -> str:
-    for key in ("sender", "sender_iban", "from", "source", "counterparty"):
+    for key in ("sender", "sender_id", "sender_iban", "from", "source", "counterparty"):
         if transaction.get(key):
             return str(transaction[key])
     return ""
 
 
 def detect_recipient(transaction: dict[str, Any]) -> str:
-    for key in ("recipient", "recipient_iban", "to", "destination", "merchant"):
+    for key in ("recipient", "recipient_id", "recipient_iban", "to", "destination", "merchant"):
         if transaction.get(key):
             return str(transaction[key])
     return ""
@@ -98,6 +98,17 @@ def detect_audio_path(transaction: dict[str, Any], dataset_root: Path) -> Path |
         candidate = (dataset_root / path).resolve()
         if candidate.exists():
             return candidate
+        name_candidate = (dataset_root / path.name).resolve()
+        if name_candidate.exists():
+            return name_candidate
+        recursive_matches = [match for match in dataset_root.rglob(path.name) if match.is_file()]
+        if recursive_matches:
+            if len(path.parts) > 1:
+                suffix = Path(*path.parts[-2:])
+                for match in recursive_matches:
+                    if str(match).endswith(str(suffix)):
+                        return match
+            return recursive_matches[0]
     return None
 
 
@@ -113,6 +124,13 @@ def detect_coordinates(transaction: dict[str, Any]) -> tuple[float, float] | Non
     lon = transaction.get("lon", transaction.get("lng", transaction.get("longitude")))
     if lat is not None and lon is not None:
         return (_safe_float(lat), _safe_float(lon))
+
+    location_text = transaction.get("location")
+    if location_text and isinstance(location_text, str):
+        match = re.search(r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)", location_text)
+        if match:
+            return (_safe_float(match.group(1)), _safe_float(match.group(2)))
+
     return None
 
 
