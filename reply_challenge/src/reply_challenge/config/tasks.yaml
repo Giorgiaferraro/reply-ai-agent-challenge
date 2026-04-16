@@ -1,0 +1,27 @@
+geo_investigation_task:
+  description: >
+    Analyze transaction geospatial evidence and detect impossible travel anomalies.
+  expected_output: >
+    Risk level, confidence and rationale based on distance, timing and user movement profile.
+  agent: geo_spatial_investigator
+
+cyber_profiling_task:
+  description: >
+    Analyze message and voice content for social engineering indicators and account-takeover patterns.
+  expected_output: >
+    Risk level, confidence and key cyber/vishing indicators.
+  agent: cyber_profiler
+
+devils_advocate_task:
+  description: >
+    Challenge high-value fraud verdicts and provide alternative non-fraud explanations.
+  expected_output: >
+    Counter-evidence, uncertainty factors and a recommendation on confidence adjustment.
+  agent: devils_advocate
+
+orchestration_task:
+  description: >
+    Synthesize specialist outputs and produce final fraud verdict for the transaction.
+  expected_output: >
+    Strict JSON verdict with is_fraud, confidence and reasons fields.
+  agent: lead_orchestrator

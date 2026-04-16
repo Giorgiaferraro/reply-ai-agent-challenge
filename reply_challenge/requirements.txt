@@ -1,0 +1,5 @@
+crewai[tools]==1.14.1
+langfuse>=3.0.0,<4.0.0
+python-dotenv>=1.0.0,<2.0.0
+openai-whisper>=20250625
+ulid-py>=1.1.0,<2.0.0
