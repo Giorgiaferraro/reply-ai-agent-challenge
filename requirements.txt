@@ -1,0 +1,6 @@
+langfuse
+python-dotenv
+pandas
+pydantic
+tenacity
+openai
